@@ -1,0 +1,15 @@
+module left_r #(
+    SIZE = 32 : SIZE > 0
+)(
+    input a[SIZE],
+    input b[5],         // shift amount (0 to 31)
+    output result[SIZE]
+)
+{
+
+    always {
+        
+        result = (a << b) | (a >> (32 - b))
+
+    }
+}

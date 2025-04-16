@@ -1,0 +1,289 @@
+module game_ram #(
+    ROW_DIMENSION = 16 : ROW_DIMENSION > 0,
+    COLUMN_DIMENSION = 16 : COLUMN_DIMENSION > 0,
+    ENCODING_AMOUNT = 5 : ENCODING_AMOUNT > 0,
+    PLAYER_WIDTH = 2 : PLAYER_WIDTH > 0,
+    PLAYER_HEIGHT = 2 : PLAYER_HEIGHT > 0,
+    CAR_WIDTH = 4 : CAR_WIDTH > 0,
+    CAR_HEIGHT = 3: CAR_HEIGHT > 0
+)(
+    input clk,  // clock
+    input rst,  // reset
+    input update,
+    input player_x_pos[32],
+    input player_y_pos[32],
+    input car1_x_pos[32],
+    input car1_y_pos[32],
+    input car1_enable,
+    input car2_x_pos[32],
+    input car2_y_pos[32],
+    input car2_enable,
+    input car3_x_pos[32],
+    input car3_y_pos[32],
+    input car3_enable,
+    input car4_x_pos[32],
+    input car4_y_pos[32],
+    input car4_enable,
+    input address[$clog2($resize(ROW_DIMENSION*COLUMN_DIMENSION, 16))],
+    output out_encoding[4],
+    output ready,
+    output debug_address_pointer[$clog2($resize(ROW_DIMENSION*COLUMN_DIMENSION, 16))],
+    output collision,
+    output debug_data[3]
+) {
+    const DEPTH = $resize(COLUMN_DIMENSION * ROW_DIMENSION, 16)
+    enum States {
+        CLEAR,
+        WRITE_PLAYER,
+        WRITE_CAR1,
+        WRITE_CAR2,
+        WRITE_CAR3,
+        WRITE_CAR4,
+        INIT_CHECK_COLLISION,
+        CHECK_COLLISION_TOPRIGHT,
+        CHECK_COLLISION_TOPLEFT,
+        CHECK_COLLISION_BOTTOMRIGHT,
+        CHECK_COLLISION_BOTTOMLEFT,
+        GAME_OVER,
+        IDLE
+    }
+    
+    dff fsm[$width(States)](.clk(clk), .rst(rst), #INIT(States.CLEAR))
+    dff writer_pointer[$clog2(DEPTH)](#INIT(0), .clk(clk), .rst(rst))
+    dff update_flag(#INIT(0), .clk(clk), .rst(rst))
+    
+    dff dx[2](.clk(clk), .rst(rst))  // 0 to 2
+    dff dy[2](.clk(clk), .rst(rst))  // 0 to 2
+    
+    dff collision_flag[1](.clk(clk), .rst(rst), #INIT(0))
+    
+    const BACKGROUND_COLOR = b000
+    const PLAYER_COLOR = b100
+    const CAR1_COLOR = b001
+    const CAR2_COLOR = b010
+    const CAR3_COLOR = b011
+    const CAR4_COLOR = b010
+    
+    simple_dual_port_ram ram(.rclk(clk), .wclk(clk), #ENTRIES(DEPTH), #WIDTH($clog2(ENCODING_AMOUNT)))
+    
+    always {
+        ram.raddr = 0
+        ram.waddr = 0
+        ram.write_data = 0
+        ram.write_enable = 0
+        out_encoding = 0
+        debug_data = 0
+        
+        writer_pointer.d = writer_pointer.q
+        fsm.d = fsm.q
+        update_flag.d = update_flag.q
+        dx.d = dx.q
+        dy.d = dy.q
+        
+        collision_flag.d = collision_flag.q
+        collision = 0
+        
+        // ready is 1 if ram is not busy updating
+        ready = fsm.q == States.IDLE
+        
+        if (update) {
+            update_flag.d = b1
+        }
+        
+        case (fsm.q) {
+            States.CLEAR:
+                ram.write_enable = b1
+                ram.waddr = writer_pointer.q
+                ram.write_data = BACKGROUND_COLOR
+                
+                writer_pointer.d = writer_pointer.q + 1
+                
+                if (&writer_pointer.q) {
+                    fsm.d = States.WRITE_PLAYER
+                    writer_pointer.d = player_y_pos*COLUMN_DIMENSION + player_x_pos
+                }   
+            
+            States.WRITE_PLAYER:     
+                ram.write_enable = b1
+                ram.waddr = (dy.q * COLUMN_DIMENSION) + dx.q + writer_pointer.q
+                ram.write_data = PLAYER_COLOR
+                
+                if (dx.q == PLAYER_WIDTH - 1) {
+                    dx.d = 0
+                    if (dy.q == PLAYER_HEIGHT - 1) {
+                        dy.d = 0 
+                        if (car1_enable) {
+                            fsm.d = States.WRITE_CAR1
+                            writer_pointer.d = car1_y_pos*COLUMN_DIMENSION + car1_x_pos
+                        } else {
+                            fsm.d = States.INIT_CHECK_COLLISION
+                            writer_pointer.d = 0
+                        }
+                    } else {
+                        dy.d = dy.q + 1
+                    }
+                } else {
+                    dx.d = dx.q + 1
+                }
+            
+            States.WRITE_CAR1:     
+                ram.write_enable = b1
+                ram.waddr = (dy.q * COLUMN_DIMENSION) + dx.q + writer_pointer.q
+                ram.write_data = CAR1_COLOR
+                
+                if (dx.q == CAR_WIDTH - 1) {
+                    dx.d = 0
+                    if (dy.q == CAR_HEIGHT - 1) {
+                        dy.d = 0 
+                        if (car2_enable) {
+                            fsm.d = States.WRITE_CAR2
+                            writer_pointer.d = car2_y_pos*COLUMN_DIMENSION + car2_x_pos
+                        } else {
+                            fsm.d = States.INIT_CHECK_COLLISION
+                            writer_pointer.d = 0
+                        }
+                    } else {
+                        dy.d = dy.q + 1
+                    }
+                } else {
+                    dx.d = dx.q + 1
+                }
+            
+            States.WRITE_CAR2:     
+                ram.write_enable = b1
+                ram.waddr = (dy.q * COLUMN_DIMENSION) + dx.q + writer_pointer.q
+                ram.write_data = CAR2_COLOR
+                
+                if (dx.q == CAR_WIDTH - 1) {
+                    dx.d = 0
+                    if (dy.q == CAR_HEIGHT - 1) {
+                        dy.d = 0
+                        if (car3_enable) {
+                            fsm.d = States.WRITE_CAR3 
+                            writer_pointer.d = car3_y_pos*COLUMN_DIMENSION + car3_x_pos
+                        } else {
+                            fsm.d = States.INIT_CHECK_COLLISION
+                            writer_pointer.d = 0
+                        }
+                        //writer_pointer.d = car3_y_pos*COLUMN_DIMENSION + car3_x_pos
+                    } else {
+                        dy.d = dy.q + 1
+                    }
+                } else {
+                    dx.d = dx.q + 1
+                }
+            
+            States.WRITE_CAR3:    
+                ram.write_enable = b1
+                ram.waddr = (dy.q * COLUMN_DIMENSION) + dx.q + writer_pointer.q
+                ram.write_data = CAR3_COLOR
+                
+                if (dx.q == CAR_WIDTH - 1) {
+                    dx.d = 0
+                    if (dy.q == CAR_HEIGHT - 1) {
+                        dy.d = 0    
+                        if (car4_enable) {
+                            fsm.d = States.WRITE_CAR4 
+                            writer_pointer.d = car4_y_pos*COLUMN_DIMENSION + car4_x_pos
+                        } else {
+                            fsm.d = States.INIT_CHECK_COLLISION
+                            writer_pointer.d = 0
+                        }                    
+                    } else {
+                        dy.d = dy.q + 1
+                    }
+                } else {
+                    dx.d = dx.q + 1
+                }
+            
+            States.WRITE_CAR4:    
+                ram.write_enable = b1
+                ram.waddr = (dy.q * COLUMN_DIMENSION) + dx.q + writer_pointer.q
+                ram.write_data = CAR4_COLOR
+                
+                if (dx.q == CAR_WIDTH - 1) {
+                    dx.d = 0
+                    if (dy.q == CAR_HEIGHT - 1) {
+                        dy.d = 0                        
+                        fsm.d = States.INIT_CHECK_COLLISION
+                        writer_pointer.d = 0
+                    } else {
+                        dy.d = dy.q + 1
+                    }
+                } else {
+                    dx.d = dx.q + 1
+                }
+            
+            States.INIT_CHECK_COLLISION:
+                // top right
+                ram.raddr = player_y_pos * 16 + player_x_pos
+                fsm.d = States.CHECK_COLLISION_TOPRIGHT
+            
+            States.CHECK_COLLISION_TOPRIGHT:
+                if (ram.read_data != BACKGROUND_COLOR && ram.read_data != PLAYER_COLOR) {
+                    //collision_flag = 1
+                    collision_flag.d = 1
+                    //fsm.d = States.GAME_OVER
+                    fsm.d = States.IDLE
+                } else {
+                    // top left
+                    ram.raddr = player_y_pos * 16 + (player_x_pos + 1)
+                    fsm.d = States.CHECK_COLLISION_TOPLEFT
+                }
+            
+            States.CHECK_COLLISION_TOPLEFT: 
+                if (ram.read_data != BACKGROUND_COLOR && ram.read_data != PLAYER_COLOR) {
+                    // collision_flag = 1
+                    collision_flag.d = 1
+                    //fsm.d = States.GAME_OVER
+                    fsm.d = States.IDLE
+                } else {
+                    // bottom right
+                    ram.raddr = (player_y_pos + 1) * 16 + player_x_pos
+                    fsm.d = States.CHECK_COLLISION_BOTTOMRIGHT
+                }
+            
+            
+            States.CHECK_COLLISION_BOTTOMRIGHT: 
+                if (ram.read_data != BACKGROUND_COLOR && ram.read_data != PLAYER_COLOR) {
+                    //collision_flag = 1
+                    collision_flag.d = 1
+                    //fsm.d = States.GAME_OVER
+                    fsm.d = States.IDLE
+                } else {
+                    // bottom left
+                    ram.raddr = (player_y_pos + 1) * 16 + (player_x_pos + 1)
+                    fsm.d = States.CHECK_COLLISION_BOTTOMLEFT
+                }
+            
+            States.CHECK_COLLISION_BOTTOMLEFT: 
+                if (ram.read_data != BACKGROUND_COLOR && ram.read_data != PLAYER_COLOR) {
+                    // collision_flag = 1
+                    collision_flag.d = 1
+                    //fsm.d = States.GAME_OVER
+                    //fsm.d = States.IDLE
+                }
+                fsm.d = States.IDLE
+            
+            States.IDLE:
+                ram.raddr = address
+                out_encoding = ram.read_data
+                fsm.d = States.IDLE
+                
+                if (update_flag.q) { // clear to 0
+                    update_flag.d = 0
+                    dx.d = 0
+                    dy.d = 0
+                    collision_flag.d = 0
+                    fsm.d = States.CLEAR
+                }
+            
+            
+        }
+        
+        collision = collision_flag.q
+        // collision = collision_flag
+        debug_address_pointer = writer_pointer.q
+        //debug_data = c{fsm.q, update_flag.q}
+    }
+}

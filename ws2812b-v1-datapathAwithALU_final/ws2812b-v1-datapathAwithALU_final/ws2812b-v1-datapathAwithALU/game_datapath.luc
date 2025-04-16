@@ -1,0 +1,286 @@
+module game_datapath #(
+    COLUMN_DIMENSION = 16,
+    ROW_DIMENSION = 16,
+    PIXEL_COUNT = 256,
+    BUFFER_SIZE = 1024
+)(
+    input clk,  // clock
+    input rst,  // reset
+    
+    output led[8],          // 8 user controllable LEDs
+    output io_led[3][8],    // LEDs on IO Shield
+    output io_segment[8],   // 7-segment LEDs on IO Shield
+    output io_select[4],    // Digit select on IO Shield
+    output data,
+    
+    input player_up_btn,
+    input player_down_btn,
+    input player_left_btn,
+    input player_right_btn,
+    input start_btn,
+
+    
+    output lives_led[2]
+    
+) {  
+    const ENCODING_AMOUNT = 5
+    const CAR_WIDTH = 4
+    const CAR_HEIGHT = 3
+    const PLAYER_START_X = (COLUMN_DIMENSION/2)-1
+    const PLAYER_START_Y = 0
+    const PLAYER_LIVES = 2
+    
+    // colours
+    sig pixel_address[BUFFER_SIZE]
+    // GREY (11), DIM BLUE (10), DIM RED (01), OFF(00)
+    const LEDCOLOR = {24hFFFF00, 24h000030, 24h030000, 24h000300, 24h000000} 
+    /*const START_SCREEN = $reverse({
+            {3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000},
+            {3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000},
+            {3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000},
+            {3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000},
+            {3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000},
+            {3b000,3b000,3b000,3b011,3b011,3b000,3b000,3b000,3b011,3b011,3b000,3b000,3b000,3b011,3b000,3b000},
+            {3b000,3b000,3b011,3b000,3b000,3b000,3b000,3b011,3b000,3b000,3b011,3b000,3b000,3b011,3b000,3b000},
+            {3b000,3b000,3b011,3b000,3b011,3b011,3b000,3b011,3b000,3b000,3b011,3b000,3b000,3b011,3b000,3b000},
+            {3b000,3b000,3b011,3b000,3b000,3b011,3b000,3b011,3b000,3b000,3b011,3b000,3b000,3b000,3b000,3b000},
+            {3b000,3b000,3b000,3b011,3b011,3b000,3b000,3b000,3b011,3b011,3b000,3b000,3b000,3b011,3b000,3b000},
+            {3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000},
+            {3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000},
+            {3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000},
+            {3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000},
+            {3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000},
+            {3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000,3b000}
+        })*/    
+    const START_SCREEN = $reverse({
+            2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00,2b00,
+            2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00,2b00,
+            2b00, 2b00, 2b11, 2b11, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b01, 2b01, 2b00, 2b00, 2b00,2b00,
+            2b00, 2b01, 2b01, 2b01, 2b01, 2b00, 2b00, 2b00, 2b00, 2b01, 2b01, 2b01, 2b01, 2b00, 2b00, 2b00,
+            2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b00, 2b00, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b00,2b00,
+            2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b00,2b00,
+            2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b00, 2b00,
+            2b00, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b00, 2b00, 2b00,
+            2b00, 2b00, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b00, 2b00, 2b00,2b00,
+            2b00, 2b00, 2b00, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b00, 2b00, 2b00, 2b00,2b00,
+            2b00, 2b00, 2b00, 2b00, 2b01, 2b01, 2b01, 2b01, 2b01, 2b01, 2b00, 2b00, 2b00, 2b00, 2b00,2b00, 
+            2b00, 2b00, 2b00, 2b00, 2b00, 2b01, 2b01, 2b01, 2b01, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00,2b00,
+            2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b01, 2b10, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00,2b00, 
+            2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00,2b00,
+            2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00,2b00,
+            2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00, 2b00
+        })
+    
+    
+    enum States {IDLE, UPDATE_RAM, REFRESH}
+    index_reverser index_reverser(#COLUMN_DIMENSION(COLUMN_DIMENSION), #SIZE($clog2(PIXEL_COUNT)))
+    
+    //temp variable
+    sig input_alu_b[32]
+    
+    alu game_alu
+    
+    .clk(clk){
+        edge_detector slow_clocks_edge[4](#RISE(4x{{1}}), #FALL(4x{{0}}))
+        edge_detector movement_buttons_edge[5](#RISE(5x{{1}}), #FALL(5x{{0}}))
+        
+        .rst(rst){ 
+            // slow clock (w/different speeds) for the moving cars
+            slow_clocks slow_clocks(#CAR1_SPEED(25), #CAR2_SPEED(26), #CAR3_SPEED(23), #CAR4_SPEED(24))
+            
+            game_ram ram(#ROW_DIMENSION(ROW_DIMENSION), #COLUMN_DIMENSION(COLUMN_DIMENSION), 
+                #ENCODING_AMOUNT(ENCODING_AMOUNT), #CAR_WIDTH(CAR_WIDTH), #CAR_HEIGHT(CAR_HEIGHT))             
+            game_cu game_cu(
+                .move_player_up_button(movement_buttons_edge.out[0]), 
+                .move_player_down_button(movement_buttons_edge.out[1]),
+                .move_player_left_button(movement_buttons_edge.out[2]), 
+                .move_player_right_button(movement_buttons_edge.out[3]),
+                .start_button(movement_buttons_edge.out[4]),
+                .car1_clk(slow_clocks_edge.out[0]),
+                .car2_clk(slow_clocks_edge.out[1]),
+                .car3_clk(slow_clocks_edge.out[2]),
+                .car4_clk(slow_clocks_edge.out[3]),
+                .collision_flag(ram.collision)
+                
+            )
+            game_regfiles game_regfiles(
+                .we(game_cu.regfile_we), 
+                .wa(game_cu.regfile_wa), 
+                .ra1(game_cu.regfile_ra1), 
+                .ra2(game_cu.regfile_ra2)
+                
+            )
+            
+            dff fsm[$width(States)](#INIT(States.IDLE))
+            
+            ws2812b_driver driver(#PIXEL_COUNT(PIXEL_COUNT))
+            
+            
+        }
+    }
+    
+    always {
+        /* Slow clock AND movement buttons edge detectors */
+        slow_clocks_edge.in = c{slow_clocks.slow4_clock_out, slow_clocks.slow3_clock_out, 
+            slow_clocks.slow2_clock_out, slow_clocks.slow1_clock_out}
+        movement_buttons_edge.in = c{start_btn, player_right_btn, player_left_btn, 
+            player_down_btn, player_up_btn}
+        
+        led = 8h00
+        io_led = 3x{{8h00}}
+        io_segment = 8hff
+        io_select = 4hf
+        data = 0
+        
+        /* player lives led */
+        // ========== LIVES LED ==============
+        case(game_regfiles.player_lives_out){
+            0 : lives_led = 2b00
+            1 : lives_led  = 2b01
+            2 : lives_led = 2b11       
+            
+            default: lives_led = 2b11
+        }    
+        
+        /* Driver inputs */
+        driver.update = 0 // do not refresh by default
+        driver.clear = 0 // do not clear by default
+        
+        index_reverser.input_address = driver.pixel_address
+        
+        /* CU inputs */
+        // bootstrap rd2 output to CU for convenient branching conditions
+        game_cu.regfile_rd2 = game_regfiles.rd2    
+        
+        /* Ram inputs */
+        ram.update = 0
+        ram.address = 0
+        ram.player_x_pos = game_regfiles.player_x_pos_out
+        ram.player_y_pos = game_regfiles.player_y_pos_out
+        ram.car1_x_pos = game_regfiles.car1_x_pos_out
+        ram.car1_y_pos = 2
+        ram.car1_enable = 1
+        ram.car2_x_pos = game_regfiles.car2_x_pos_out
+        ram.car2_y_pos = 5 
+        ram.car2_enable = 1
+        ram.car3_x_pos = game_regfiles.car3_x_pos_out 
+        ram.car3_y_pos = 8
+        ram.car3_enable = 0
+        ram.car4_x_pos = game_regfiles.car4_x_pos_out 
+        ram.car4_y_pos = 11
+        ram.car4_enable = 0
+        if (game_regfiles.player_level_out > 1) {
+            ram.car3_enable = 1
+        }
+        if (game_regfiles.player_level_out > 2) {
+            ram.car4_enable = 1
+        }
+        if (game_regfiles.player_level_out > 3) {
+            ram.car1_enable = 0
+            ram.car2_enable = 0
+            ram.car3_enable = 0
+            ram.car4_enable = 0
+        }
+        
+        /* ============ SAYANG READ HERE 1 =============
+        // from ram
+        game_cu.ram_ready = ram.ready
+        // from driver
+        game_cu.driver_read_pixel = driver.pixel_address
+        game_cu.driver_next_pixel = driver.next_pixel
+        game_cu.driver_done = driver.done
+        game_cu.driver_reset = driver.reset
+        // from regfile
+        game_cu.regfiles_update_ram_flag = game_regfiles.update_ram_flag_out
+        */        
+        
+        // bsel mux
+        case (game_cu.bsel) {
+            b000 : input_alu_b = game_regfiles.rd2
+            b001 : input_alu_b = 1
+            b010 : input_alu_b = 0
+            b011 : input_alu_b = 3
+            b100 : input_alu_b = 7 // middle pos
+            b110 : input_alu_b = 2 // lives
+            default: // necessary to init
+                input_alu_b = 0
+        }
+        
+        // wdsel mux
+        case (game_cu.alu_out_sel) {
+            b00: game_regfiles.wd = game_alu.out
+            b01 : game_regfiles.wd = 0 // ram.update = 0
+            b10 : game_regfiles.wd = 1 // ram.update = 1
+            default : 
+                game_regfiles.wd = game_alu.out
+        }
+        
+        // alu
+        game_alu.a = game_regfiles.rd1
+        game_alu.b = input_alu_b
+        game_alu.alufn = game_cu.alufn
+        
+        case (fsm.q) {
+            States.UPDATE_RAM:   
+                pixel_address = index_reverser.output_address
+                
+                if (ram.ready & driver.reset) {
+                    // clear flag
+                    fsm.d = States.REFRESH
+                    ram.address = index_reverser.output_address
+                    //ram.address = driver.pixel_address
+                    if (game_regfiles.game_started_out == 1) {
+                        driver.color = LEDCOLOR[START_SCREEN[$resize(pixel_address, $clog2($width(START_SCREEN, 0)))]] 
+                        // [$resize(pixel_address, $clog2($width(DISPLAY, 0)))]
+                    }
+                    else {
+                        driver.color = LEDCOLOR[ram.out_encoding]
+                    }   
+                    driver.update = 1
+                }
+            //led[1:0] = b10
+            
+            States.REFRESH: 
+                if (driver.next_pixel) {
+                    index_reverser.input_address = driver.pixel_address + 1
+                }
+                
+                ram.address = index_reverser.output_address
+                pixel_address = index_reverser.output_address
+                
+                if (game_regfiles.game_started_out == 1) { 
+                    driver.color = LEDCOLOR[START_SCREEN[$resize(pixel_address, $clog2($width(START_SCREEN, 0)))]]
+                } else {
+                    driver.color = LEDCOLOR[ram.out_encoding]
+                }
+                
+                if (driver.done) {
+                    fsm.d = States.IDLE
+                }
+            //led[1:0] = b11
+            
+            States.IDLE: 
+                //game_regfiles = d13     // read update flag into rd2
+                if (game_cu.alu_out_sel == b10) {
+                    fsm.d = States.UPDATE_RAM
+                    ram.update = 1
+                }
+            //led[1:0] = b01
+            //index_reverser.input_address = ram.debug_address_pointer
+        }
+        pixel_address = index_reverser.output_address
+        if (game_regfiles.game_started_out == 1) { 
+            driver.color = LEDCOLOR[START_SCREEN[$resize(pixel_address, $clog2($width(START_SCREEN, 0)))]]
+        } else {
+            driver.color = LEDCOLOR[ram.out_encoding]
+        }
+        //driver.color = LEDCOLOR[ram.out_encoding]
+        data = driver.data
+        
+        // debug
+        io_led[2][0] = ram.collision
+        io_led[0] = slow_clocks.slow1_clock_out
+        io_led[1] = game_regfiles.game_started_out
+        
+    }
+}

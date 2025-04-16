@@ -1,0 +1,549 @@
+module game_cu #(
+    COLUMN_DIMENSION = 16 : COLUMN_DIMENSION > 0,
+    ROW_DIMENSION = 16 : ROW_DIMENSION > 0,
+    PIXEL_COUNT = 256 : PIXEL_COUNT > 0,
+    BUFFER_SIZE = 1024 : BUFFER_SIZE > 0,
+    LIVES = 2 : LIVES > 0
+)(
+    input clk,  // clock
+    input rst,  // reset
+    
+    input regfile_rd2[32], //direct reading of regfile data from rd2
+    
+    input car1_clk,
+    input car2_clk,
+    input car3_clk,
+    input car4_clk,
+    
+    input move_player_up_button,
+    input move_player_down_button,
+    input move_player_left_button,
+    input move_player_right_button,
+    input start_button,
+    
+    input collision_flag,
+    
+    /* ============ SAYANG READ HERE 2 =================
+    // from driver's outputs
+    input driver_read_pixel[$clog2(PIXEL_COUNT)],
+    input driver_next_pixel,
+    input driver_done,
+    input driver_reset,
+    
+    // from game_data_ram's "ready" output
+    input ram_ready,
+    
+    // from regfiles' "update_ram_flag" output
+    input regfiles_update_ram_flag,
+    */    
+    
+    output alufn[6],
+    //output asel[3],
+    output bsel[3],
+    output alu_out_sel[2], // wdsel mux
+    output regfile_wa[4],
+    output regfile_ra1[4],
+    output regfile_ra2[4],
+    output regfile_we,
+    
+    //output matrix_data,
+    // hardcoded LED matrix screens
+    output game_start,
+    output debug[4]
+) {
+    
+    //index_reverser index_reverser(#COLUMN_DIMENSION(COLUMN_DIMENSION), #SIZE($clog2(PIXEL_COUNT)))
+    
+    enum GameStates {
+        IDLE,
+        CHECK_GAME_STATE,
+        MOVE_PLAYER_UP,
+        MOVE_PLAYER_DOWN,
+        MOVE_PLAYER_LEFT,
+        MOVE_PLAYER_RIGHT,
+        CHECK_CAR1_BOUNDARY,
+        FLIP_CAR1_DIRECTION_LEFT,
+        FLIP_CAR1_DIRECTION_RIGHT,
+        MOVE_CAR1,
+        CHECK_CAR2_BOUNDARY,
+        FLIP_CAR2_DIRECTION_LEFT,
+        FLIP_CAR2_DIRECTION_RIGHT,
+        MOVE_CAR2,
+        CHECK_CAR3_BOUNDARY,
+        FLIP_CAR3_DIRECTION_LEFT,
+        FLIP_CAR3_DIRECTION_RIGHT,
+        MOVE_CAR3,
+        CHECK_CAR4_BOUNDARY,
+        FLIP_CAR4_DIRECTION_LEFT,
+        FLIP_CAR4_DIRECTION_RIGHT,
+        MOVE_CAR4,
+        CHECK_COLLISION, // TODO: TRF FROM RAM TO HERE
+        DEC_PLAYER_LIVES,
+        CHECK_PLAYER_LIVES,
+        RESET_X_POS,
+        RESET_Y_POS,
+        CHECK_WIN,
+        GAMEOVER,
+        RESET_PLAYER_LIVES,
+        CHECK_GOAL_REACHED,
+        NEXT_LEVEL,
+        UPDATE_RAM
+    }
+    
+    .clk(clk) {
+        .rst(rst) {
+            //game_data_ram ram(#ROW_DIMENSION(ROW_DIMENSION), #COLUMN_DIMENSION(COLUMN_DIMENSION), 
+            //#ENCODING_AMOUNT(ENCODING_AMOUNT), #CAR_WIDTH(CAR_WIDTH), #CAR_HEIGHT(CAR_HEIGHT))
+            
+            dff game_fsm[$width(GameStates)](#INIT(GameStates.IDLE))
+            
+            //ws2812b_driver driver(#PIXEL_COUNT(PIXEL_COUNT))
+        }
+    }
+    
+    always {
+        
+        // standard setting unless otherwise overwritten by each case 
+        alufn = 0
+        //asel = 0 
+        bsel = 0
+        regfile_we = 0
+        regfile_wa = 0 
+        regfile_ra1 = d0
+        regfile_ra2 = d0
+        alu_out_sel = 0
+        
+        game_start = 0
+        debug = b0000 
+        
+        /*case (regfile_rd2[3]) {
+            1:
+                ram.car1_y_pos = 4 // lv1
+                ram.car2_y_pos = 9 // lv1
+            2:
+                ram.car1_y_pos = 2 // lv2
+                ram.car2_y_pos = 5 // lv2
+        }*/        
+        
+        game_fsm.d = game_fsm.q
+        if (rst) {
+            game_fsm.d = GameStates.IDLE
+        }
+        
+        else {
+            
+            // move player -> rd1 rd2 x y pos, bsel=1 to increment, alufn --> 
+            case(game_fsm.q) {
+                
+                GameStates.IDLE:
+                    // clear update flag
+                    alu_out_sel = 0
+                    
+                    if (start_button) {
+                        game_start = 1
+                        regfile_ra2 = d12
+                        game_fsm.d = GameStates.CHECK_GAME_STATE
+                    }
+                    
+                    if (collision_flag == 1) {
+                        game_fsm.d = GameStates.CHECK_COLLISION
+                    }
+                    
+                    // check if within boundary
+                    if (move_player_up_button) {
+                        regfile_ra2 = d1   // read y-pos
+                        
+                        if (regfile_rd2 < ROW_DIMENSION-2) {
+                            game_fsm.d = GameStates.MOVE_PLAYER_UP
+                        }
+                    }
+                    else if (move_player_down_button) {
+                        regfile_ra2 = d1   // read y-pos
+                        
+                        if (regfile_rd2 > 0) { // if y pos > 0
+                            game_fsm.d = GameStates.MOVE_PLAYER_DOWN
+                        }
+                    }
+                    else if (move_player_left_button) {
+                        regfile_ra2 = d0   // read x-pos
+                        
+                        if (regfile_rd2 > 0) { // if x pos > 0
+                            game_fsm.d = GameStates.MOVE_PLAYER_LEFT
+                        }
+                    }
+                    else if (move_player_right_button) {
+                        regfile_ra2 = d0   // read x-pos
+                        
+                        if (regfile_rd2 < COLUMN_DIMENSION-2) {
+                            game_fsm.d = GameStates.MOVE_PLAYER_RIGHT
+                        }
+                    }
+                    else if (car1_clk) {
+                        game_fsm.d = GameStates.CHECK_CAR1_BOUNDARY
+                    }
+                    else if (car2_clk) {
+                        game_fsm.d = GameStates.CHECK_CAR2_BOUNDARY
+                    }
+                    else if (car3_clk) {
+                        game_fsm.d = GameStates.CHECK_CAR3_BOUNDARY
+                    }
+                    else if (car4_clk) {
+                        game_fsm.d = GameStates.CHECK_CAR4_BOUNDARY
+                    }
+                    else {
+                        game_fsm.d = GameStates.IDLE
+                    }
+                    /*else {
+                        game_fsm.d = GameStates.MOVE_CAR1
+                    }*/                
+                
+                GameStates.CHECK_GAME_STATE:
+                    alufn = b001100
+                    regfile_ra1 = d12
+                    bsel = b001
+                    regfile_we = 1
+                    regfile_wa = d12
+                    alu_out_sel = b00  // THIS is what drives wd = alu.out
+                    game_start = 1
+                    game_fsm.d = GameStates.UPDATE_RAM
+                
+                /*GameStates.CHECK_GAME_STATE:
+                    alufn = b001100            // '"B"
+                    regfile_ra1 = d12           // game started reg
+                    bsel = b001                 // set 1
+                    regfile_we = 1
+                    regfile_wa = d12 
+                    game_start = 1
+                    /*if (regfile_rd2 == 0) { // if game has not started, set game reg = 1
+                        alufn = b000000            // ADD
+                        regfile_ra1 = d12           // game started reg
+                        bsel = b001                 // add 1
+                        regfile_we = 1
+                        regfile_wa = d12           
+                    }
+                    else { // game has started, go back to start screen
+                        alufn = b000001            // SUB
+                        regfile_ra1 = d12           // game started reg
+                        bsel = b001                 // add 1
+                        regfile_we = 1
+                        regfile_wa = d12 
+                    }                    
+                    alu_out_sel = 0
+                game_fsm.d = GameStates.UPDATE_RAM*/                
+                
+                GameStates.MOVE_PLAYER_UP:
+                    alufn = b000000            // ADD
+                    regfile_ra1 = d1           // player y pos
+                    bsel = b001                 // add 1
+                    regfile_we = 1
+                    regfile_wa = d1            // player y pos
+                    game_fsm.d = GameStates.CHECK_GOAL_REACHED
+                
+                GameStates.MOVE_PLAYER_DOWN:
+                    alufn = b000001            // SUB
+                    regfile_ra1 = d1           // player y pos
+                    bsel = b001                 // sub 1
+                    regfile_we = 1
+                    regfile_wa = d1            // player y pos
+                    game_fsm.d = GameStates.CHECK_GOAL_REACHED
+                
+                GameStates.MOVE_PLAYER_LEFT:
+                    alufn = b000001            // SUB
+                    regfile_ra1 = d0           // player x pos
+                    bsel = b001                 // sub 1
+                    regfile_we = 1
+                    regfile_wa = d0            // player x pos
+                    game_fsm.d = GameStates.CHECK_GOAL_REACHED
+                
+                GameStates.MOVE_PLAYER_RIGHT:
+                    alufn = b000000            // ADD
+                    regfile_ra1 = d0           // player x pos
+                    bsel = b001                 // add 1
+                    regfile_we = 1
+                    regfile_wa = d0            // player x pos
+                    game_fsm.d = GameStates.CHECK_GOAL_REACHED
+                
+                GameStates.CHECK_CAR1_BOUNDARY:
+                    regfile_ra2 = d4  // car1_x_pos
+                    if (regfile_rd2 == 16 - 4) { // if at edge (COL_DIM - CAR_WIDTH)
+                        game_fsm.d = GameStates.FLIP_CAR1_DIRECTION_LEFT
+                    } else if (regfile_rd2 == 0) {
+                        game_fsm.d = GameStates.FLIP_CAR1_DIRECTION_RIGHT
+                    } else {
+                        game_fsm.d = GameStates.MOVE_CAR1  // no flip needed
+                    }
+                
+                // If at right edge and moving right, flip to left
+                GameStates.FLIP_CAR1_DIRECTION_LEFT:
+                    regfile_ra2 = d5 // car direction reg
+                    if (regfile_rd2 == 1) {
+                        alufn = b000001   // subtract 1 (flip from 1 to 0)
+                        regfile_ra1 = d5
+                        bsel = b001
+                        regfile_we = 1
+                        regfile_wa = d5
+                    }
+                    game_fsm.d = GameStates.MOVE_CAR1
+                
+                // If at left edge and moving left, flip to right
+                GameStates.FLIP_CAR1_DIRECTION_RIGHT:
+                    regfile_ra2 = d5 // car direction reg
+                    if (regfile_rd2 == 0) {
+                        alufn = b000000   // add 1 (flip from 0 to 1)
+                        regfile_ra1 = d5
+                        bsel = b001
+                        regfile_we = 1
+                        regfile_wa = d5
+                    }
+                    game_fsm.d = GameStates.MOVE_CAR1
+                
+                GameStates.MOVE_CAR1:
+                    regfile_ra2 = d5   // read car1 direction
+                    if (regfile_rd2 == 1) { // if right, add
+                        alufn = b000000           
+                    }
+                    else { // if left, sub
+                        alufn = b000001
+                    }     
+                    regfile_ra1 = d4           // car1 x pos
+                    bsel = b001                 // const 1
+                    regfile_we = 1
+                    regfile_wa = d4            // car1 x pos
+                    game_fsm.d = GameStates.CHECK_COLLISION
+                
+                GameStates.CHECK_CAR2_BOUNDARY:
+                    regfile_ra2 = d6  // car2_x_pos
+                    if (regfile_rd2 == 16 - 4) { // if at edge (COL_DIM - CAR_WIDTH)
+                        game_fsm.d = GameStates.FLIP_CAR2_DIRECTION_LEFT
+                    } else if (regfile_rd2 == 0) {
+                        game_fsm.d = GameStates.FLIP_CAR2_DIRECTION_RIGHT
+                    } else {
+                        game_fsm.d = GameStates.MOVE_CAR2  // no flip needed
+                    }
+                
+                // If at right edge and moving right, flip to left
+                GameStates.FLIP_CAR2_DIRECTION_LEFT:
+                    regfile_ra2 = d7 // car direction reg
+                    if (regfile_rd2 == 1) {
+                        alufn = b000001   // subtract 1 (flip from 1 to 0)
+                        regfile_ra1 = d7
+                        bsel = b001
+                        regfile_we = 1
+                        regfile_wa = d7
+                    }
+                    game_fsm.d = GameStates.MOVE_CAR2
+                
+                // If at left edge and moving left, flip to right
+                GameStates.FLIP_CAR2_DIRECTION_RIGHT:
+                    regfile_ra2 = d7 // car direction reg
+                    if (regfile_rd2 == 0) {
+                        alufn = b000000   // add 1 (flip from 0 to 1)
+                        regfile_ra1 = d7
+                        bsel = b001
+                        regfile_we = 1
+                        regfile_wa = d7
+                    }
+                    game_fsm.d = GameStates.MOVE_CAR2
+                
+                GameStates.MOVE_CAR2:
+                    regfile_ra2 = d7   // read car2 direction
+                    if (regfile_rd2 == 1) { // if right, add
+                        alufn = b000000           
+                    }
+                    else { // if left, sub
+                        alufn = b000001
+                    }     
+                    regfile_ra1 = d6           // car2 x pos
+                    bsel = b001                 // const 1
+                    regfile_we = 1
+                    regfile_wa = d6            // car2 x pos
+                    game_fsm.d = GameStates.CHECK_COLLISION
+                
+                GameStates.CHECK_CAR3_BOUNDARY:
+                    regfile_ra2 = d8  // car3_x_pos
+                    if (regfile_rd2 == 16 - 4) { // if at edge (COL_DIM - CAR_WIDTH)
+                        game_fsm.d = GameStates.FLIP_CAR3_DIRECTION_LEFT
+                    } else if (regfile_rd2 == 0) {
+                        game_fsm.d = GameStates.FLIP_CAR3_DIRECTION_RIGHT
+                    } else {
+                        game_fsm.d = GameStates.MOVE_CAR3  // no flip needed
+                    }
+                
+                // If at right edge and moving right, flip to left
+                GameStates.FLIP_CAR3_DIRECTION_LEFT:
+                    regfile_ra2 = d9 // car direction reg
+                    if (regfile_rd2 == 1) {
+                        alufn = b000001   // subtract 1 (flip from 1 to 0)
+                        regfile_ra1 = d9
+                        bsel = b001
+                        regfile_we = 1
+                        regfile_wa = d9
+                    }
+                    game_fsm.d = GameStates.MOVE_CAR3
+                
+                // If at left edge and moving left, flip to right
+                GameStates.FLIP_CAR3_DIRECTION_RIGHT:
+                    regfile_ra2 = d9 // car direction reg
+                    if (regfile_rd2 == 0) {
+                        alufn = b000000   // add 1 (flip from 0 to 1)
+                        regfile_ra1 = d9
+                        bsel = b001
+                        regfile_we = 1
+                        regfile_wa = d9
+                    }
+                    game_fsm.d = GameStates.MOVE_CAR3
+                
+                GameStates.MOVE_CAR3:
+                    regfile_ra2 = d9   // read car3 direction
+                    if (regfile_rd2 == 1) { // if right, add
+                        alufn = b000000           
+                    }
+                    else { // if left, sub
+                        alufn = b000001
+                    }     
+                    regfile_ra1 = d8           // car3 x pos
+                    bsel = b001                 // const 1
+                    regfile_we = 1
+                    regfile_wa = d8            // car3 x pos
+                    game_fsm.d = GameStates.CHECK_COLLISION
+                
+                GameStates.CHECK_CAR4_BOUNDARY:
+                    regfile_ra2 = d10  // car4_x_pos
+                    if (regfile_rd2 == 16 - 4) { // if at edge (COL_DIM - CAR_WIDTH)
+                        game_fsm.d = GameStates.FLIP_CAR4_DIRECTION_LEFT
+                    } else if (regfile_rd2 == 0) {
+                        game_fsm.d = GameStates.FLIP_CAR4_DIRECTION_RIGHT
+                    } else {
+                        game_fsm.d = GameStates.MOVE_CAR4  // no flip needed
+                    }
+                
+                // If at right edge and moving right, flip to left
+                GameStates.FLIP_CAR4_DIRECTION_LEFT:
+                    regfile_ra2 = d11 // car direction reg
+                    if (regfile_rd2 == 1) {
+                        alufn = b000001   // subtract 1 (flip from 1 to 0)
+                        regfile_ra1 = d11
+                        bsel = b001
+                        regfile_we = 1
+                        regfile_wa = d11
+                    }
+                    game_fsm.d = GameStates.MOVE_CAR4
+                
+                // If at left edge and moving left, flip to right
+                GameStates.FLIP_CAR4_DIRECTION_RIGHT:
+                    regfile_ra2 = d11 // car direction reg
+                    if (regfile_rd2 == 0) {
+                        alufn = b000000   // add 1 (flip from 0 to 1)
+                        regfile_ra1 = d11
+                        bsel = b001
+                        regfile_we = 1
+                        regfile_wa = d11
+                    }
+                    game_fsm.d = GameStates.MOVE_CAR4
+                
+                GameStates.MOVE_CAR4:
+                    regfile_ra2 = d11   // read car4 direction
+                    if (regfile_rd2 == 1) { // if right, add
+                        alufn = b000000           
+                    }
+                    else { // if left, sub
+                        alufn = b000001
+                    }     
+                    regfile_ra1 = d10           // car4 x pos
+                    bsel = b001                 // const 1
+                    regfile_we = 1
+                    regfile_wa = d10            // car4 x pos
+                    game_fsm.d = GameStates.CHECK_COLLISION
+                
+                GameStates.CHECK_COLLISION:
+                    if (collision_flag == 1) {
+                        game_fsm.d = GameStates.DEC_PLAYER_LIVES
+                    }
+                    else {
+                        game_fsm.d = GameStates.UPDATE_RAM
+                    }
+                
+                GameStates.DEC_PLAYER_LIVES:
+                    alufn = b000001            // sub
+                    regfile_ra1 = d2           // player lives
+                    bsel = b001                 // sub 1
+                    regfile_we = 1
+                    regfile_wa = d2            // player lives
+                    game_fsm.d = GameStates.CHECK_PLAYER_LIVES
+                
+                GameStates.RESET_X_POS: // 
+                    alufn = b001100           // "B"
+                    regfile_ra1 = d0           // player x pos
+                    bsel = b100                 // set player x = 7
+                    regfile_we = 1
+                    regfile_wa = d0            // player x pos
+                    game_fsm.d = GameStates.RESET_Y_POS
+                
+                GameStates.RESET_Y_POS: // 
+                    alufn = b001100           // "B"
+                    regfile_ra1 = d1           // player y pos
+                    bsel = b010                 // set player y = 0
+                    regfile_we = 1
+                    regfile_wa = d1            // player y pos
+                    game_fsm.d = GameStates.UPDATE_RAM
+                
+                GameStates.CHECK_PLAYER_LIVES:
+                    regfile_ra2 = d2  // player lives
+                    if (regfile_rd2 == 0) {
+                        game_fsm.d = GameStates.GAMEOVER
+                    } else if (regfile_rd2 == 1) {
+                        game_fsm.d = GameStates.RESET_X_POS
+                    } else {
+                        game_fsm.d = GameStates.UPDATE_RAM
+                    }
+                
+                GameStates.CHECK_GOAL_REACHED:
+                    regfile_ra2 = d1
+                    if (regfile_rd2 == 16 - 2) { // COL[15] - 1 (2x2 player)
+                        game_fsm.d = GameStates.NEXT_LEVEL
+                    }
+                    else {
+                        game_fsm.d = GameStates.UPDATE_RAM
+                    }
+                
+                GameStates.NEXT_LEVEL:
+                    alufn = b000000           // add
+                    regfile_ra1 = d3          // player level
+                    bsel = b001
+                    regfile_we = 1
+                    regfile_wa = d3
+                    game_fsm.d = GameStates.RESET_Y_POS
+                
+                GameStates.CHECK_WIN:
+                    regfile_ra2 = d3 // player level
+                    if (regfile_rd2 > 3) {
+                        game_fsm.d = GameStates.RESET_Y_POS
+                    } else {
+                        game_fsm.d = GameStates.RESET_Y_POS
+                    }
+                
+                GameStates.GAMEOVER:
+                    alufn = b001100           // set player level = 1
+                    regfile_ra1 = d3          // player level
+                    bsel = b001
+                    regfile_we = 1
+                    regfile_wa = d3
+                    game_fsm.d = GameStates.RESET_PLAYER_LIVES
+                
+                GameStates.RESET_PLAYER_LIVES:
+                    alufn = b001100           // set player lives = 2
+                    regfile_ra1 = d2          
+                    bsel = b110
+                    regfile_we = 1
+                    regfile_wa = d2
+                    game_fsm.d = GameStates.RESET_X_POS
+                
+                GameStates.UPDATE_RAM:
+                    alu_out_sel = b10          // update ram reg = 1
+                    game_fsm.d = GameStates.IDLE
+                
+                
+            }
+        }
+    }
+}

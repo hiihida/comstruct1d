@@ -1,0 +1,96 @@
+module alchitry_top (
+    input clk,              // 100MHz clock
+    input rst_n,            // reset button (active low)
+    output led[8],          // 8 user controllable LEDs
+    input usb_rx,            // USB->Serial input
+    output usb_tx,           // USB->Serial output
+    output io_led[3][8],     // LEDs on IO Shield
+    output io_segment[8],        // 7-segment LEDs on IO Shield
+    output io_select[4],        // Digit select on IO Shield
+    input io_button[5],      // 5 buttons on IO Shield
+    input io_dip[3][8],       // DIP switches on IO Shield
+    output lives_led[2],
+    output data,
+    
+    input player_up_btn,
+    input player_down_btn,
+    input player_left_btn,
+    input player_right_btn,
+    input start_btn
+) {
+    
+    sig rst                 // reset signal
+    
+    const CLK_FREQ = $is_sim() ? 1000 : 100000000 // put 1000 for sim, 100M for hardware 
+    //const SEVEN_SEG_DIV = $is_sim() ? 3 : 16 // put 3 for sim, 16 for hardware
+    const CAR_CLOCK_DIV = $is_sim() ? 9 : 26 // put 9 for sim, 26 for hardware 
+    const FAST_CLOCK_DIV = $is_sim() ? 7 : 21 // put 7 for sim, 21 for hardware 
+    
+    const COLUMN_DIMENSION = 5d16 // how many "columns"? 5d16
+    const ROW_DIMENSION = 5d16 // how many "rows"? 5d16
+    const PIXEL_COUNT = 10d256 // how many LEDs in total? 10d256
+    const LIVES_NORMAL = 2
+    const LIVES_HARD = 1
+    
+    //DO LATER seven_seg seg
+    
+    .clk(clk) {
+        // The reset conditioner is used to synchronize the reset signal to the FPGA
+        // clock. This ensures the entire FPGA comes out of reset at the same time.
+        reset_conditioner reset_cond
+        // user inputs 
+        button_conditioner movement_button[5](#CLK_FREQ(5x{{CLK_FREQ}}))
+        edge_detector movement_button_edge[5](#RISE(5x{{1}}), #FALL(5x{{0}}))
+        
+        
+        .rst(rst){
+            
+            game_datapath game_datapath( 
+                #COLUMN_DIMENSION(COLUMN_DIMENSION), #ROW_DIMENSION(ROW_DIMENSION),
+                #PIXEL_COUNT(PIXEL_COUNT))
+
+        }
+    }
+    
+    //DO LATER bin_to_dec bin_to_dec_converter(#DIGITS(1))
+    
+    always {
+        reset_cond.in = ~rst_n  // input raw inverted reset signal
+        rst = reset_cond.out    // conditioned reset
+        
+        usb_tx = usb_rx         // loop serial port
+        io_segment = 8hF
+        io_select = 4hF
+        led = 8h00
+        io_led = 3x{{8h00}}
+        data = 0
+        
+        lives_led = game_datapath.lives_led
+
+       movement_button.in = c{start_btn, player_right_btn, player_left_btn, player_down_btn, player_up_btn} 
+        // 0: up, 2: down, 3: left, 4: right
+        movement_button_edge.in = movement_button.out
+        
+        // ====== PLAYER MOVEMENT ======
+        
+        // we assume a player is a 2x2 square, the coordinate stored in player_x_pos and player_y_pos indicate top right dot 
+        game_datapath.player_up_btn = movement_button_edge.out[0]
+        game_datapath.player_down_btn = movement_button_edge.out[1]
+        game_datapath.player_left_btn = movement_button_edge.out[2]
+        game_datapath.player_right_btn = movement_button_edge.out[3]
+        game_datapath.start_btn = reset_cond.out
+        
+        io_segment = game_datapath.io_segment
+        data = game_datapath.data
+        led = game_datapath.led
+        //io_led = game_datapath.io_led
+        io_led[0] = game_datapath.io_led[0]    // x pos
+        io_led[1] = game_datapath.io_led[1]   // y pos
+        io_led[2] = movement_button.out[4]
+
+ 
+        
+        
+        
+    }
+}

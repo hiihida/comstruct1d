@@ -1,0 +1,26 @@
+module rotater #(
+    SIZE = 32 : SIZE > 0
+)(
+    input a[SIZE],
+    input b[5],         // shift amount (0 to 31)
+    input alufn[6],
+    output result[SIZE]
+) {
+    left_r rotl
+    right_rotater rotr
+    always {
+        rotl.a = a
+        rotl.b = b
+        
+        rotr.a = a
+        rotr.b = b
+        
+        case(alufn[4:3]){    
+            // route result of left_rotater or right_rotater to output of rotater depending on alufn[4:3]
+            b01: result = rotl.result
+            b10: result = rotr.result
+            default: result = rotl.result
+        }
+
+    }
+}

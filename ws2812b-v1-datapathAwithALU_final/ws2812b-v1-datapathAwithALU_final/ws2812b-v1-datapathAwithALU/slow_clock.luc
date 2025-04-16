@@ -1,0 +1,32 @@
+module slow_clocks #(
+    CAR1_SPEED = 25,
+    CAR2_SPEED = 26,
+    CAR3_SPEED = 23,
+    CAR4_SPEED = 24
+)(
+    input clk,  // clock
+    input rst,  // reset
+    output slow1_clock_out,
+    output slow2_clock_out,
+    output slow3_clock_out,
+    output slow4_clock_out
+
+) {
+    
+    .clk(clk){
+        .rst(rst){
+            counter slow1_counter(#SIZE(32))               // 32-bit counter for slow clock
+            counter slow2_counter(#SIZE(32))
+            counter slow3_counter(#SIZE(32))
+            counter slow4_counter(#SIZE(32))
+        }
+    }
+    
+    always {
+        slow1_clock_out = slow1_counter.value[CAR1_SPEED]
+        slow2_clock_out = slow2_counter.value[CAR2_SPEED]
+        slow3_clock_out = slow3_counter.value[CAR3_SPEED]
+        slow4_clock_out = slow4_counter.value[CAR4_SPEED]
+ 
+    }
+}

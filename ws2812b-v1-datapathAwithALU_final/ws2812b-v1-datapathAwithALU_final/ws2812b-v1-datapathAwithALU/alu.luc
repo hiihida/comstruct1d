@@ -1,0 +1,70 @@
+module alu (
+    input a[32],
+    input b[32],
+    input alufn[6],
+    output out[32],
+    output z,
+    output v,
+    output n
+) {
+    adder adder(#SIZE(32))
+    compare compare
+    boolean boolean
+    shifter shifter
+    multiplier multiplier
+    rotater rotater  
+    
+    always {
+        // Set up the adder, comparator, boolean, shifter, multiplier and rotater modules
+        adder.a = a
+        adder.b = b
+        adder.alufn_signal = alufn
+        
+        compare.z = adder.z
+        compare.v = adder.v
+        compare.n = adder.n
+        compare.alufn = alufn
+        
+        boolean.a = a
+        boolean.b = b
+        boolean.alufn = alufn
+        
+        shifter.a = a
+        shifter.b = b[4:0]   // Use the lower 5 bits as the shift amount
+        shifter.alufn = alufn
+        
+        multiplier.a = a
+        multiplier.b = b
+        
+        rotater.a = a
+        rotater.b = b[4:0] // Use the lower 5 bits as the shift amount
+        rotater.alufn = alufn
+        
+        // Propagate condition flags from the adder
+        z = adder.z
+        v = adder.v
+        n = adder.n
+        
+        // Select the ALU output based on the alufn code
+        case (alufn){
+            b000000: out = adder.out         // add
+            b000001: out = adder.out         // sub
+            b000010: out = multiplier.mul    // mul
+            b011000: out = boolean.bool      // and
+            b011110: out = boolean.bool      // or
+            b010110: out = boolean.bool      // xor
+            b011010: out = boolean.bool      // "A" (LDR)
+            b001100: out = boolean.bool      // "B" ADDITIONAL ALU FUNCTIONALITY
+            b100000: out = shifter.shift     // shl
+            b100001: out = shifter.shift     // shr
+            b100011: out = shifter.shift     // sra
+            b101000: out = rotater.result    // rotate left
+            b110000: out = rotater.result    // rotate right
+            b110011: out = c{31x{b0}, compare.cmp} // cmpeq
+            b110101: out = c{31x{b0}, compare.cmp} // cmplt
+            b110111: out = c{31x{b0}, compare.cmp} // cmple
+            default:
+                out = adder.out
+        }
+    }
+}

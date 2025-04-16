@@ -1,0 +1,165 @@
+module game_regfiles #(
+    COLUMN_DIMENSION = 16,
+    ROW_DIMENSION = 16,
+    CAR_WIDTH = 4,
+    CAR_HEIGHT = 3,
+    LEVELS = 3, // Random number for now
+    LIVES = 2,
+    PLAYER_START_X = (16/2)-1,
+    PLAYER_START_Y = 0  
+)(
+    input clk,  // clock
+    input rst,  // reset
+    input we,
+    input wa[32],
+    input wd[32],
+    
+    input ra1[4],
+    input ra2[4], 
+    output rd1[32], // read data port 1
+    output rd2[32], // read data port 2
+    
+    output player_lives_out[32],
+    output player_x_pos_out[32],
+    output player_y_pos_out[32],
+    output player_level_out[32],
+    output car1_x_pos_out[32],
+    output car2_x_pos_out[32],
+    output car3_x_pos_out[32],
+    output car4_x_pos_out[32],
+    
+    output game_started_out[32]
+    //output update_ram_flag_out[1]
+    //output on_off_toggle_out[1],
+    
+) {       
+    
+    
+    .clk(clk){
+        .rst(rst){
+            dff player_x_pos[32](#INIT(PLAYER_START_X)) // start in middle
+            dff player_y_pos[32](#INIT(PLAYER_START_Y))
+            dff player_lives[32](#INIT(LIVES))
+            dff player_level[32](#INIT(1))
+            
+            //dff player_win[2](#INIT(0)) // 0 init, 1 lose, 2
+            
+            dff car1_x_pos[32](#INIT(2))
+            dff car1_direction[32](#INIT(1)) // 1 for moving right, 0 for moving left
+            
+            dff car2_x_pos[32](#INIT(11))
+            dff car2_direction[32](#INIT(0)) // 1 for moving right, 0 for moving left
+            
+            dff car3_x_pos[32](#INIT(1))
+            dff car3_direction[32](#INIT(1)) // 1 for moving right, 0 for moving left
+            
+            dff car4_x_pos[32](#INIT(10))
+            dff car4_direction[32](#INIT(0)) // 1 for moving right, 0 for moving left
+            
+            dff game_started[32](#INIT(0)) // track if game started (reached Level 1)
+            //dff update_ram_flag[32](#INIT(0))
+            //dff on_off_toggle
+            //dff temp_var[32](#INIT(0))
+            
+            
+        }
+    }
+    
+    always {
+        rd1 = 32b0 
+        rd2 = 32b0
+        
+        player_x_pos.d = player_x_pos.q
+        player_y_pos.d = player_y_pos.q
+        player_lives.d = player_lives.q
+        player_level.d = player_level.q
+        
+        car1_x_pos.d = car1_x_pos.q
+        car1_direction.d = car1_direction.q
+        car2_x_pos.d = car2_x_pos.q
+        car2_direction.d = car2_direction.q
+        car3_x_pos.d = car3_x_pos.q
+        car3_direction.d = car3_direction.q
+        car4_x_pos.d = car4_x_pos.q
+        car4_direction.d = car4_direction.q
+        
+        game_started.d = game_started.q
+        //update_ram_flag.d = update_ram_flag.q
+        //on_off_toggle.d = on_off_toggle.q
+        
+        
+        //write port
+        if (we){
+            case(wa){
+                d0: player_x_pos.d = wd
+                d1: player_y_pos.d = wd
+                d2: player_lives.d = wd
+                d3: player_level.d = wd
+                d4: car1_x_pos.d = wd
+                d5: car1_direction.d = wd
+                d6: car2_x_pos.d = wd
+                d7: car2_direction.d = wd
+                d8: car3_x_pos.d = wd
+                d9: car3_direction.d = wd
+                d10: car4_x_pos.d = wd
+                d11: car4_direction.d = wd
+                d12: game_started.d = wd
+            }
+        }
+        
+        //read port a
+        case(ra1){
+            d0: rd1 = player_x_pos.q
+            d1: rd1 = player_y_pos.q
+            d2: rd1 = player_lives.q
+            d3: rd1 = player_level.q
+            d4: rd1 = car1_x_pos.q
+            d5: rd1 = car1_direction.q
+            d6: rd1 = car2_x_pos.q
+            d7: rd1 = car2_direction.q
+            d8: rd1 = car3_x_pos.q
+            d9: rd1 = car3_direction.q
+            d10: rd1 = car4_x_pos.q
+            d11: rd1 = car4_direction.q
+            d12: rd1 = game_started.q
+            //d14: rd2 = on_off_toggle.q
+            
+            default: rd1 = 0  
+        }
+        
+        //read port b
+        case(ra2){
+            d0: rd2 = player_x_pos.q
+            d1: rd2 = player_y_pos.q
+            d2: rd2 = player_lives.q
+            d3: rd2 = player_level.q
+            d4: rd2  = car1_x_pos.q
+            d5: rd2 = car1_direction.q
+            d6: rd2 = car2_x_pos.q
+            d7: rd2 = car2_direction.q
+            d8: rd2 = car3_x_pos.q
+            d9: rd2 = car3_direction.q
+            d10: rd2 = car4_x_pos.q
+            d11: rd2 = car4_direction.q
+            d12: rd2 = game_started.q
+            //d14: rd2 = on_off_toggle.q
+            
+            default: rd2 = 0 
+        }
+        
+        player_lives_out = player_lives.q
+        player_x_pos_out = player_x_pos.q
+        player_y_pos_out = player_y_pos.q
+        player_level_out = player_level.q
+        car1_x_pos_out = car1_x_pos.q  
+        car2_x_pos_out = car2_x_pos.q
+        car3_x_pos_out = car3_x_pos.q
+        car4_x_pos_out = car4_x_pos.q
+        game_started_out = game_started.q
+        
+        
+        //update_ram_flag_out = update_ram_flag.q
+        //on_off_toggle_out = on_off_toggle.q
+        
+    }
+}

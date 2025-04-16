@@ -1,0 +1,36 @@
+module right_rotater #(
+    SIZE = 32 : SIZE > 0
+)(
+    input a[SIZE],
+    input b[5],         // shift amount (0 to 31)
+    output result[SIZE]
+)
+{
+    sig left_part[SIZE]
+    sig right_part[SIZE]
+    sig inv_shift[5]
+
+    left_shifter ls_inst
+    right_shifter rs_inst
+
+    always {
+        // compute inverse shift amount: inv_shift = 32 - b.
+        inv_shift = 32 - b
+
+        // set up the right shifter to compute a >> b.
+        rs_inst.a = a
+        rs_inst.b = b
+        rs_inst.pad = 0
+        right_part = rs_inst.sh1
+
+        // set up the left shifter to compute a << (32 - b).
+        ls_inst.a = a
+        ls_inst.b = inv_shift
+        ls_inst.pad = 0
+        left_part = ls_inst.sh1
+
+        // combine results
+        // result = (value >> n | (value << (32 - n))
+        result = left_part | right_part
+    }
+}

@@ -1,0 +1,35 @@
+module shifter (
+    input a[32],
+    input b[5],
+    input alufn[6],
+    output shift[32]
+) { 
+    left_shifter left_shifter
+    right_shifter right_shifter
+    right_shifter right_shifter_arithmetic
+
+    always {
+        // implement shifter unit logic here
+        left_shifter.a = a
+        left_shifter.b = b
+        left_shifter.pad = 0
+        right_shifter.a = a
+        right_shifter.b = b
+        right_shifter.pad = 0
+        right_shifter_arithmetic.a = a
+        right_shifter_arithmetic.b = b
+        right_shifter_arithmetic.pad = a[31] // MSB of a[32]
+
+        case(alufn[1:0]) {
+            b00: shift = left_shifter.sh1
+            //shift = a << b
+            b01: shift = right_shifter.sh1
+            //shift = a >> b
+            b11: shift = right_shifter_arithmetic.sh1
+            //shift = $signed(a)>>>b
+            default:
+                shift = 0
+        }
+        
+    } 
+}

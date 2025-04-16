@@ -1,0 +1,289 @@
+/*
+module game_mode #(
+    COLUMN_DIMENSION = 16,
+    ROW_DIMENSION = 16,
+    PIXEL_COUNT = 256,
+    BUFFER_SIZE = 1024,
+    LIVES = 2
+)(
+    input clk,
+    input rst,
+    output led[8],
+    output io_led[3][8],
+    output io_segment[8],
+    output io_select[4],
+    input io_button[5],
+    input io_dip[3][8],
+    output data
+) {
+    const CLK_FREQ = $is_sim() ? 1000 : 100000000
+    const ROW_DIM = 16
+    const ENCODING_AMOUNT = 5
+    // GREY (11), DIM BLUE (10), DIM RED (01), OFF(00)
+    const LEDCOLOR = {24h00F000, 24h000030, 24h030000, 24h000300, 24h000000} 
+    const CAR_WIDTH = 4
+    const CAR_HEIGHT = 3
+    const PLAYER_START_X = (COLUMN_DIMENSION/2)-1
+    const PLAYER_START_Y = 0
+    
+    enum States {IDLE, UPDATE_RAM, REFRESH}
+    index_reverser index_reverser(#COLUMN_DIMENSION(COLUMN_DIMENSION), #SIZE($clog2(PIXEL_COUNT)))
+    
+    sig slow_clock1
+    sig slow_clock2
+    
+    .clk(clk){
+        edge_detector slow_clock1_edge(#RISE(1), #FALL(0))     // Detect rising edge of slow clock
+        edge_detector slow_clock2_edge(#RISE(1), #FALL(0))
+        
+        .rst(rst){
+            game_data_ram ram(#ROW_DIMENSION(ROW_DIMENSION), #COLUMN_DIMENSION(COLUMN_DIMENSION), 
+                #ENCODING_AMOUNT(ENCODING_AMOUNT), #CAR_WIDTH(CAR_WIDTH), #CAR_HEIGHT(CAR_HEIGHT))
+            
+            dff player_x_pos[$clog2(COLUMN_DIMENSION)](#INIT((PLAYER_START_X))) // start in middle
+            dff player_y_pos[$clog2(ROW_DIMENSION)](#INIT(PLAYER_START_Y))
+            dff player_lives[LIVES](#INIT(LIVES))
+            //dff player_level[3](#INIT(0)) // 0 init, 3 win
+            
+            dff car1_x_pos[$clog2(COLUMN_DIMENSION)](#INIT(2))
+            dff car1_y_pos[$clog2(ROW_DIMENSION)](#INIT(2)) // change row dimension
+            dff car1_direction(#INIT(1)) // 1 for moving right, 0 for moving left
+            
+            dff car2_x_pos[$clog2(COLUMN_DIMENSION)](#INIT(11))
+            dff car2_y_pos[$clog2(ROW_DIMENSION)](#INIT(5)) // change row dimension
+            dff car2_direction(#INIT(0)) // 1 for moving right, 0 for moving left
+            
+            dff car3_x_pos[$clog2(COLUMN_DIMENSION)](#INIT(0))
+            dff car3_y_pos[$clog2(ROW_DIMENSION)](#INIT(8)) // change row dimension
+            dff car3_direction(#INIT(1)) // 1 for moving right, 0 for moving left
+            
+            dff update_ram_flag(#INIT(0))
+            dff fsm[$width(States)](#INIT(States.IDLE))
+            ws2812b_driver driver(#PIXEL_COUNT(PIXEL_COUNT))
+            
+            dff slow1_counter[32]               // 32-bit counter for slow clock
+            dff slow2_counter[32]  
+            dff on_off_toggle
+            
+        }
+    }
+    
+    // user inputs 
+    button_conditioner movement_button[5](.clk(5x{{clk}}), #CLK_FREQ(5x{{CLK_FREQ}}))
+    edge_detector movement_button_edge[5](.clk(5x{{clk}}), #RISE(5x{{1}}), #FALL(5x{{0}}))
+    
+    always {
+        led = 8h00
+        io_led = 3x{{8h00}}
+        io_segment = 8hff
+        io_select = 4hf
+        data = 0
+        
+        player_x_pos.d = player_x_pos.q
+        player_y_pos.d = player_y_pos.q
+        player_lives.d = player_lives.q
+        
+        car1_x_pos.d = car1_x_pos.q
+        car1_y_pos.d = car1_y_pos.q
+        car1_direction.d = car1_direction.q
+        car2_x_pos.d = car2_x_pos.q
+        car2_y_pos.d = car2_y_pos.q
+        car2_direction.d = car2_direction.q
+        car3_x_pos.d = car3_x_pos.q
+        car3_y_pos.d = car3_y_pos.q
+        car3_direction.d = car3_direction.q
+        
+        ram.update = 0
+        ram.address = 0
+        update_ram_flag.d = update_ram_flag.q
+        on_off_toggle.d = on_off_toggle.q
+        fsm.d = fsm.q
+        
+        movement_button.in = c{io_button[1], io_button[4], io_button[3], io_button[2], io_button[0]} 
+        // 0: up, 2: down, 3: left, 4: right
+        movement_button_edge.in = movement_button.out
+        driver.update = 0 // do not refresh by default
+        driver.clear = 0 // do not clear by default
+        
+        index_reverser.input_address = driver.pixel_address
+        
+        // Slow clock logic
+        slow1_counter.d = slow1_counter.q + 1
+        slow_clock1 = slow1_counter.q[25] // Choose bit 27 for ~1 second at 100 MHz
+        slow_clock1_edge.in = slow_clock1
+        
+        slow2_counter.d = slow2_counter.q + 1
+        slow_clock2 = slow2_counter.q[26] // Choose bit 27 for ~1 second at 100 MHz
+        slow_clock2_edge.in = slow_clock2
+        
+        // ====== PLAYER MOVEMENT ======
+        
+        // we assume a player is a 2x2 square, the coordinate stored in player_x_pos and player_y_pos indicate top right dot 
+        if (movement_button_edge.out[0]){
+            // clamp at 0
+            if (player_y_pos.q < COLUMN_DIMENSION-2){
+                player_y_pos.d = player_y_pos.q + 1 // up
+            }
+        }
+        if (movement_button_edge.out[1]){
+            // clamp 
+            if (|player_y_pos.q){
+                player_y_pos.d = player_y_pos.q - 1 // down
+            }
+        }
+        if (movement_button_edge.out[2]){ // io_button[3]
+            // clamp 
+            if (|player_x_pos.q){
+                player_x_pos.d = player_x_pos.q - 1 // left
+            }
+        }
+        if (movement_button_edge.out[3]){ // io_button[4]
+            // clamp at 0 
+            if (player_x_pos.q < COLUMN_DIMENSION-2){
+                player_x_pos.d = player_x_pos.q + 1 // right
+            }
+        }
+        
+        // update the ram whenever player moves or io_button[0] is pressed
+        if (|movement_button_edge.out[3:0] | (movement_button_edge.out[4] & ~on_off_toggle.q)){
+            update_ram_flag.d = 1
+        }
+        
+        // ====== CAR MOVEMENT ======
+        
+        if (slow_clock1_edge.out) {
+            // ====== CAR 1 ======
+            // if car reaches rightmost edge & moving right, move left
+            if ((car1_x_pos.q == ROW_DIM - CAR_WIDTH - 1) && car1_direction.q == 1) {
+                car1_direction.d = 0
+            }
+            // if car reaches leftmost edge & moving left, move right
+            else if ((car1_x_pos.q == 1) && car1_direction.q == 0) {
+                car1_direction.d = 1
+            }
+            
+            if (car1_direction.q == 1) {
+                car1_x_pos.d =  car1_x_pos.q + 1
+            } else {
+                car1_x_pos.d =  car1_x_pos.q - 1
+            }
+            
+            // ====== CAR 2 ======
+            // if car reaches rightmost edge & moving right, move left
+            if ((car2_x_pos.q == ROW_DIM - CAR_WIDTH - 1) && car2_direction.q == 1) {
+                car2_direction.d = 0
+            }
+            // if car reaches leftmost edge & moving left, move right
+            else if ((car2_x_pos.q == 1) && car2_direction.q == 0) {
+                car2_direction.d = 1
+            }
+            
+            if (car2_direction.q == 1) {
+                car2_x_pos.d =  car2_x_pos.q + 1
+            } else {
+                car2_x_pos.d =  car2_x_pos.q - 1
+            }
+            
+            update_ram_flag.d = 1
+        }
+        
+        if (slow_clock2_edge.out) {
+            // ====== CAR 3 ======
+            // if car reaches rightmost edge & moving right, move left
+            if ((car3_x_pos.q == ROW_DIM - CAR_WIDTH - 1) && car3_direction.q == 1) {
+                car3_direction.d = 0
+            }
+            // if car reaches leftmost edge & moving left, move right
+            else if ((car3_x_pos.q == 1) && car3_direction.q == 0) {
+                car3_direction.d = 1
+            }
+            
+            if (car3_direction.q == 1) {
+                car3_x_pos.d =  car3_x_pos.q + 1
+            } else {
+                car3_x_pos.d =  car3_x_pos.q - 1
+            }
+            
+            update_ram_flag.d = 1
+        }
+        
+        // ====== COLLISION CHECK ======
+        if (ram.collision == 1) {
+            player_lives.d = player_lives.q - 1
+            player_x_pos.d = PLAYER_START_X
+            player_y_pos.d = PLAYER_START_Y
+            
+            update_ram_flag.d = 1
+        }
+        
+        // ====== PLAYER LIVES CHECK ======
+        if (player_lives.q == 0) {
+            driver.clear = 1
+            
+            //update_ram_flag.d = 1
+        }
+        
+        // ====== TOGGLE ON/OFF ======
+        
+        if (movement_button_edge.out[4]){
+            if (on_off_toggle.q){
+                driver.clear = 1
+            }
+            on_off_toggle.d = ~on_off_toggle.q
+        }        
+        
+        ram.player_x_pos = player_x_pos.q 
+        ram.player_y_pos = player_y_pos.q
+        ram.car1_x_pos = car1_x_pos.q
+        ram.car1_y_pos = car1_y_pos.q
+        ram.car2_x_pos = car2_x_pos.q
+        ram.car2_y_pos = car2_y_pos.q
+        ram.car3_x_pos = car3_x_pos.q
+        ram.car3_y_pos = car3_y_pos.q
+        ram.car3_enable = 1
+        
+        case (fsm.q) {
+            States.UPDATE_RAM:
+                if (ram.ready & driver.reset) {
+                    // clear flag
+                    update_ram_flag.d = 0
+                    fsm.d = States.REFRESH
+                    ram.address = index_reverser.output_address
+                    //ram.address = driver.pixel_address
+                    driver.update = 1
+                }
+                led[1:0] = b10
+            
+            States.REFRESH: 
+                if (driver.next_pixel) {
+                    index_reverser.input_address = driver.pixel_address + 1
+                }
+                
+                ram.address = index_reverser.output_address
+                
+                if (driver.done) {
+                    fsm.d = States.IDLE
+                }
+                led[1:0] = b11
+            
+            States.IDLE: 
+                if (update_ram_flag.q) {
+                    fsm.d = States.UPDATE_RAM
+                    ram.update = 1
+                }
+                led[1:0] = b01
+            //index_reverser.input_address = ram.debug_address_pointer
+        }
+        
+        driver.color = LEDCOLOR[ram.out_encoding]
+        //driver.color = 24h000300
+        data = driver.data
+        
+        // debug
+        //io_led[0] = car2_x_pos.q
+        io_led[1] = ram.debug_address_pointer
+        
+        io_led[2][1:0] = driver.debug
+    }
+}
+*/
